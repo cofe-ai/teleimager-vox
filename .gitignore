@@ -10,3 +10,5 @@ build/
 *.key
 *.cnf
 *_client.yaml
+.omo/
+reports/
