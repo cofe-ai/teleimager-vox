@@ -22,8 +22,3 @@ head_audio:
     enable: true
     zmq_port: 55561        # 独立端口
     poll_interval: 0.15    # 秒，硬件更新率约 100-200ms
-
-  # --- xvf3800_doa_vad 脚本路径 ---
-  # 解析顺序: 此字段 → 环境变量 XVF_DOA_VAD_PATH
-  # → ~/projects/voxinsight-sensor-gateway/xvf3800_doa_vad/
-  xvf_doa_vad_path: null

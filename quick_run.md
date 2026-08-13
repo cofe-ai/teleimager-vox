@@ -162,6 +162,7 @@ pip install -e ".[audio]"
 ```
 
 ## 发现音频设备
+> 注意使用: root权限
 ```bash
 teleimager-audio-server --audio-cf
 ```
@@ -183,19 +184,13 @@ teleimager-audio-server --audio-cf
 - 修改 `zmq_port` 若默认端口被占用
 
 ## 启动音频服务端
+> 注意使用: root权限
 ```bash
 # 使用默认配置文件 audio_config.yaml
 teleimager-audio-server
 
 # 指定配置文件
 teleimager-audio-server --config audio_config.yaml
-```
-
-## DOA/VAD 支持
-若 xvf3800_doa_vad 脚本不在默认路径（`~/projects/voxinsight-sensor-gateway/xvf3800_doa_vad/`），设置环境变量：
-```bash
-export XVF_DOA_VAD_PATH=/path/to/xvf3800_doa_vad
-teleimager-audio-server
 ```
 
 ## 快速验证（无客户端）
@@ -229,8 +224,10 @@ print(f'DOA={msg[\"doa\"]}°  VAD={msg[\"vad\"]}')
 
 ## 客户端连接
 ```bash
+# 仅测试
 teleimager-audio-client --host <server-ip>
-teleimager-audio-client --host 192.168.4.1 --duration 10
+# 保存音频
+teleimager-audio-client --host <server-ip> --duration 10 --save-wav ./capture.wav
 ```
 
 ## 端口规划

@@ -1,17 +1,14 @@
 """Tests for AudioServer, BaseAudioDevice, XVF3800AudioDevice, XVF3800DoaVadPoller."""
-import os
 import struct
 import threading
 import time
 import textwrap
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from teleimager.audio_server import (
-    _resolve_xvf_path,
     BaseAudioDevice,
     XVF3800AudioDevice,
     XVF3800DoaVadPoller,
@@ -24,31 +21,7 @@ from teleimager.audio_server import (
 
 
 # ---------------------------------------------------------------------------
-# Test 1: _resolve_xvf_path with env var pointing at a real (tmp) directory
-# ---------------------------------------------------------------------------
-
-def test_resolve_xvf_path_env_var(tmp_path, monkeypatch):
-    """XVF_DOA_VAD_PATH env var pointing to existing directory is returned."""
-    monkeypatch.setenv("XVF_DOA_VAD_PATH", str(tmp_path))
-    result = _resolve_xvf_path(None)
-    assert result == tmp_path.resolve()
-
-
-# ---------------------------------------------------------------------------
-# Test 2: _resolve_xvf_path returns None when nothing exists
-# ---------------------------------------------------------------------------
-
-def test_resolve_xvf_path_returns_none_when_all_missing(monkeypatch):
-    """Returns None when env var, cfg_path, and default sibling path all miss."""
-    monkeypatch.delenv("XVF_DOA_VAD_PATH", raising=False)
-    # Patch Path.home so the default sibling path won't accidentally exist
-    monkeypatch.setattr(Path, "home", staticmethod(lambda: Path("/tmp/nonexistent_home_xyz")))
-    result = _resolve_xvf_path("/tmp/definitely_does_not_exist_abc123")
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Test 3: AUDIO_HEADER_SIZE constant is exactly 20
+# Test 1: AUDIO_HEADER_SIZE constant is exactly 20
 # ---------------------------------------------------------------------------
 
 def test_header_size_constant():
@@ -56,7 +29,7 @@ def test_header_size_constant():
 
 
 # ---------------------------------------------------------------------------
-# Test 4: BaseAudioDevice can be initialised via XVF3800AudioDevice
+# Test 2: BaseAudioDevice can be initialised via XVF3800AudioDevice
 # ---------------------------------------------------------------------------
 
 def test_base_audio_device_init():
@@ -155,11 +128,12 @@ def test_xvf3800_audio_device_defaults():
 
 
 # ---------------------------------------------------------------------------
-# Test 8: XVF3800DoaVadPoller with xvf_path=None sets available=False
+# Test 8: XVF3800DoaVadPoller sets available=False when xvf3800 package unavailable
 # ---------------------------------------------------------------------------
 
-def test_doa_vad_poller_unavailable_when_path_none():
-    poller = XVF3800DoaVadPoller("t", {}, None)
+def test_doa_vad_poller_unavailable_when_xvf3800_missing():
+    with patch("teleimager.audio_server._XVF3800_AVAILABLE", False):
+        poller = XVF3800DoaVadPoller("t", {})
     assert poller.available is False
 
 

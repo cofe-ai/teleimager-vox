@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import sys
 import time
 import json
 import queue
@@ -22,7 +20,6 @@ import logging
 import threading
 import signal
 import argparse
-from pathlib import Path
 
 import numpy as np
 import yaml
@@ -41,34 +38,19 @@ except ImportError:
     sd = None
     _SD_AVAILABLE = False
 
+try:
+    from teleimager.xvf3800 import DoaVadReader as _DoaVadReader
+    _XVF3800_AVAILABLE = True
+except ImportError:
+    _DoaVadReader = None
+    _XVF3800_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
-# ZMQ audio frame header (little-endian, 20 bytes total):
-# magic(u16=2B) | version(u8=1B) | channels(u8=1B) | codec(u8=1B) | pad(1B)
-# | timestamp_ns(i64=8B) | sample_rate(u16=2B) | payload_len(u32=4B)
-# Layout: H(2)+B(1)+B(1)+B(1)+x(1)+q(8)+H(2)+I(4) = 20 bytes
 AUDIO_HEADER_FMT  = "<HBBBxqHI"
 AUDIO_HEADER_SIZE = struct.calcsize(AUDIO_HEADER_FMT)   # must equal 20
 AUDIO_MAGIC       = 0xA0D1
 CODEC_PCM         = 0x01
-
-
-def _resolve_xvf_path(cfg_path):
-    """Resolve the xvf3800_doa_vad scripts directory path.
-    Priority: cfg_path argument > XVF_DOA_VAD_PATH env var > default sibling repo path.
-    Returns a Path if it exists, otherwise None.
-    """
-    candidates = [
-        cfg_path,
-        os.environ.get("XVF_DOA_VAD_PATH"),
-        str(Path.home() / "projects" / "voxinsight-sensor-gateway" / "xvf3800_doa_vad"),
-    ]
-    for c in candidates:
-        if c:
-            p = Path(str(c)).expanduser().resolve()
-            if p.exists():
-                return p
-    return None
 
 
 class BaseAudioDevice:
@@ -98,30 +80,29 @@ class BaseAudioDevice:
         raise NotImplementedError
 
     def _zmq_pub(self):
-        """Read from pcm_ring_buffer, pack header+PCM, publish via ZMQ PUB."""
-        pub_mgr    = ZMQ_PublisherManager.get_instance()
-        idle_sleep = self.chunk_samples / self.sample_rate * 0.5
+        pub_mgr        = ZMQ_PublisherManager.get_instance()
+        frame_interval = self.chunk_samples / self.sample_rate
+        last_ts        = None
 
         while self._running:
             frame = self.pcm_ring_buffer.read()
-            if frame is None:
-                time.sleep(idle_sleep)
+            if frame is None or frame["timestamp_ns"] == last_ts:
+                time.sleep(frame_interval * 0.5)
                 continue
 
+            last_ts  = frame["timestamp_ns"]
             pcm_data = frame["pcm"].astype(np.float32)
-            ts_ns    = frame["timestamp_ns"]
             payload  = pcm_data.tobytes()
 
             header = struct.pack(
                 AUDIO_HEADER_FMT,
-                AUDIO_MAGIC,        # u32 magic
-                1,                  # u8 version
-                self.channels,      # u8 channels
-                CODEC_PCM,          # u8 codec (PCM float32)
-                                    # 1 byte pad (from 'x' in fmt)
-                ts_ns,              # i64 timestamp_ns
-                self.sample_rate,   # u16 sample_rate
-                len(payload),       # u32 payload_len
+                AUDIO_MAGIC,
+                1,
+                self.channels,
+                CODEC_PCM,
+                last_ts,
+                self.sample_rate,
+                len(payload),
             )
             pub_mgr.publish(header + payload, self.zmq_port)
 
@@ -240,40 +221,23 @@ class XVF3800DoaVadPoller:
     and all threads are silently skipped.
     """
 
-    def __init__(self, topic, doa_cfg, xvf_path):
+    def __init__(self, topic, doa_cfg):
         self.topic         = topic
         self.enable_zmq    = bool(doa_cfg.get("enable", True))
         self.zmq_port      = int(doa_cfg.get("zmq_port", 55561))
         self.poll_interval = float(doa_cfg.get("poll_interval", 0.15))
         self.ring_buffer   = TripleRingBuffer()
         self._running      = False
-        self.available     = False
-        self._DoaVadReader = None
+        self.available     = _XVF3800_AVAILABLE
 
-        if xvf_path is not None:
-            try:
-                xvf_str = str(xvf_path)
-                if xvf_str not in sys.path:
-                    sys.path.insert(0, xvf_str)
-                from get_doa_vad import DoaVadReader  # noqa: PLC0415
-                self._DoaVadReader = DoaVadReader
-                self.available = True
-                logger.info("[%s] xvf3800_doa_vad loaded from %s", topic, xvf_path)
-            except ImportError as e:
-                logger.warning(
-                    "[%s] xvf3800_doa_vad import failed: %s. DOA/VAD disabled.", topic, e
-                )
-        else:
-            logger.warning(
-                "[%s] xvf3800_doa_vad path not found. DOA/VAD disabled.", topic
-            )
+        if not self.available:
+            logger.warning("[%s] teleimager.xvf3800 not available. DOA/VAD disabled.", topic)
 
     def _poll_loop(self):
-        """Polling thread: USB read -> ring_buffer write -> ZMQ publish."""
         pub_mgr = ZMQ_PublisherManager.get_instance()
 
         try:
-            reader = self._DoaVadReader()
+            reader = _DoaVadReader()
         except RuntimeError as e:
             logger.error("[%s] XVF3800 DOA/VAD device not found: %s", self.topic, e)
             return
@@ -335,13 +299,12 @@ class AudioServer:
             cfg = yaml.safe_load(f)
         self._audio_config_raw = cfg
         for topic, dev_cfg in cfg.items():
-            xvf_path = _resolve_xvf_path(dev_cfg.get("xvf_doa_vad_path"))
-            device   = XVF3800AudioDevice(topic, dev_cfg)
+            device = XVF3800AudioDevice(topic, dev_cfg)
             self._audio_devices[topic] = device
 
             doa_cfg = dev_cfg.get("doa_vad", {})
             if doa_cfg.get("enable", True):
-                poller = XVF3800DoaVadPoller(topic, doa_cfg, xvf_path)
+                poller = XVF3800DoaVadPoller(topic, doa_cfg)
                 self._doa_vad_pollers[topic] = poller
 
     def start(self):

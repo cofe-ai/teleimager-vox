@@ -14,6 +14,7 @@
 
 import time
 import json
+import wave
 import struct
 import logging
 import threading
@@ -280,6 +281,21 @@ class AudioClient:
 # CLI entry point
 # ========================================================
 
+def _save_wav(path: str, frames: list, sample_rate: int) -> None:
+    if not frames:
+        logger.warning("No audio frames collected, skipping WAV save.")
+        return
+    pcm = np.concatenate(frames, axis=0)
+    pcm_int16 = np.clip(pcm * 32767.0, -32768, 32767).astype(np.int16)
+    n_samples, n_channels = pcm_int16.shape
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(n_channels)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_int16.tobytes())
+    logger.info("Saved %d samples × %d ch @ %d Hz → %s", n_samples, n_channels, sample_rate, path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="TeleImager Audio Client — receive and display audio stream info"
@@ -287,6 +303,7 @@ def main():
     parser.add_argument("--host",     required=True, help="Audio server IP address")
     parser.add_argument("--topic",    default="head_audio", help="Audio topic name (default: head_audio)")
     parser.add_argument("--duration", type=float, default=5.0, help="How long to run in seconds (default: 5.0)")
+    parser.add_argument("--save-wav", metavar="PATH", default=None, help="Save received PCM to a WAV file at this path")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -298,6 +315,15 @@ def main():
     client = AudioClient(host=args.host, request_pcm=True)
     logger.info("Connected to %s. Monitoring for %.1fs ...", args.host, args.duration)
 
+    topic_cfg     = client.get_audio_config().get(args.topic, {})
+    chunk_samples = int(topic_cfg.get("chunk_samples", 2560))
+    sample_rate   = int(topic_cfg.get("sample_rate",   16000))
+    poll_interval = chunk_samples / sample_rate
+    logger.info(
+        f"topic_cfg={topic_cfg} chunk_samples={chunk_samples}  sample_rate={sample_rate}  poll_interval={poll_interval}"
+    )
+
+    wav_frames: List[np.ndarray] = []
     end_time = time.time() + args.duration
     while time.time() < end_time:
         try:
@@ -308,9 +334,14 @@ def main():
                 "[%s] fps=%.1f  shape=%s  DOA=%3d°  VAD=%s",
                 args.topic, audio.fps, shape_str, doa.doa, "YES" if doa.vad else "no",
             )
+            if args.save_wav and audio.pcm is not None:
+                wav_frames.append(audio.pcm)
         except ValueError as e:
             logger.warning("%s", e)
-        time.sleep(1.0)
+        time.sleep(poll_interval)
+
+    if args.save_wav:
+        _save_wav(args.save_wav, wav_frames, sample_rate)
 
     client.close()
 
