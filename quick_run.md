@@ -148,3 +148,95 @@ python -m teleimager.image_server --config vox_cam_config_server.yaml
 ```bash
 python teleimager-client --host 192.168.1.156
 ```
+
+---
+
+# 音频服务端操作
+
+## 安装音频依赖
+
+```bash
+conda activate teleimager
+pip install "sounddevice>=0.4.6" "pyusb>=1.2.1" "libusb-package>=1.0.26"
+pip install -e ".[audio]"
+```
+
+## 发现音频设备
+```bash
+teleimager-audio-server --audio-cf
+```
+> 列出所有音频输入设备，XVF3800 候选设备会标注 `*** XVF3800 CANDIDATE ***`
+
+示例输出：
+```
+00:00:00 INFO  ==================================================================
+00:00:00 INFO  Audio Device Discovery
+00:00:00 INFO  ==================================================================
+00:00:00 INFO    [ 0] XMOS XVF3800 (hw:1,0)          6 ch @  16000 Hz  *** XVF3800 CANDIDATE ***
+00:00:00 INFO    [ 1] pulse                          32 ch @  44100 Hz
+00:00:00 INFO  ==================================================================
+```
+
+## 编辑配置文件
+根据 `--audio-cf` 输出，按需编辑 `audio_config.yaml`：
+- 若自动检测失败，将 `device_id: null` 改为检测到的设备名称（如 `device_id: "XMOS XVF3800 (hw:1,0)"`）
+- 修改 `zmq_port` 若默认端口被占用
+
+## 启动音频服务端
+```bash
+# 使用默认配置文件 audio_config.yaml
+teleimager-audio-server
+
+# 指定配置文件
+teleimager-audio-server --config audio_config.yaml
+```
+
+## DOA/VAD 支持
+若 xvf3800_doa_vad 脚本不在默认路径（`~/projects/voxinsight-sensor-gateway/xvf3800_doa_vad/`），设置环境变量：
+```bash
+export XVF_DOA_VAD_PATH=/path/to/xvf3800_doa_vad
+teleimager-audio-server
+```
+
+## 快速验证（无客户端）
+
+```bash
+# 验证音频 ZMQ 帧接收（需服务端已启动）
+python3 -c "
+import zmq, struct
+ctx = zmq.Context()
+sock = ctx.socket(zmq.SUB)
+sock.connect('tcp://localhost:55560')
+sock.setsockopt_string(zmq.SUBSCRIBE, '')
+sock.setsockopt(zmq.RCVTIMEO, 3000)
+data = sock.recv()
+magic = struct.unpack_from('<H', data)[0]
+print(f'Received {len(data)} bytes, magic=0x{magic:X}')
+"
+
+# 验证 DOA/VAD 接收
+python3 -c "
+import zmq, json
+ctx = zmq.Context()
+sock = ctx.socket(zmq.SUB)
+sock.connect('tcp://localhost:55561')
+sock.setsockopt_string(zmq.SUBSCRIBE, '')
+sock.setsockopt(zmq.RCVTIMEO, 3000)
+msg = json.loads(sock.recv())
+print(f'DOA={msg[\"doa\"]}°  VAD={msg[\"vad\"]}')
+"
+```
+
+## 客户端连接
+```bash
+teleimager-audio-client --host <server-ip>
+teleimager-audio-client --host 192.168.4.1 --duration 10
+```
+
+## 端口规划
+
+| 端口 | 用途 | 协议 |
+|---|---|---|
+| 55559 | 音频配置查询 | ZMQ REQ-REP |
+| 55560 | head_audio PCM 音频帧 | ZMQ PUB-SUB |
+| 55561 | head_audio DOA/VAD 元数据 | ZMQ PUB-SUB |

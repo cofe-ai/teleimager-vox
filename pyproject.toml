@@ -35,6 +35,11 @@ raspi = [
     "aiortc",
     "pupil-labs-uvc",
 ]
+audio = [
+    "sounddevice>=0.4.6",
+    "pyusb>=1.2.1",
+    "libusb-package>=1.0.26",
+]
 
 [project.urls]
 Homepage = "https://github.com/unitreerobotics/teleimager"
@@ -52,3 +57,5 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 teleimager-server = "teleimager.image_server:main"
 teleimager-client = "teleimager.image_client:main"
+teleimager-audio-server = "teleimager.audio_server:main"
+teleimager-audio-client = "teleimager.audio_client:main"

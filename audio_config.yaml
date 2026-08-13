@@ -1,0 +1,29 @@
+# XVF3800 麦克风阵列音频配置
+head_audio:
+  # --- 传输协议 ---
+  enable_zmq: true
+  zmq_port: 55560          # PCM 音频帧端口
+
+  enable_webrtc: false     # WebRTC 音频（默认关闭）
+  webrtc_port: 60010
+  webrtc_codec: opus
+
+  # --- 设备参数 ---
+  type: xvf3800
+  device_id: null          # null = 自动检测（匹配名称含 XMOS/XVF 的设备）
+
+  # --- 音频格式 ---
+  sample_rate: 16000       # Hz，XVF3800 原生 16kHz
+  channels: 6              # 固定 6 通道
+  chunk_samples: 2560      # 每帧样本数 = 160ms @ 16kHz
+
+  # --- DOA/VAD 元数据 ---
+  doa_vad:
+    enable: true
+    zmq_port: 55561        # 独立端口
+    poll_interval: 0.15    # 秒，硬件更新率约 100-200ms
+
+  # --- xvf3800_doa_vad 脚本路径 ---
+  # 解析顺序: 此字段 → 环境变量 XVF_DOA_VAD_PATH
+  # → ~/projects/voxinsight-sensor-gateway/xvf3800_doa_vad/
+  xvf_doa_vad_path: null
